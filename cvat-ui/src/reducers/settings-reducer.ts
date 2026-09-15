@@ -65,7 +65,7 @@ const defaultState: SettingsState = {
         contrastLevel: 100,
         saturationLevel: 100,
         relatedOverlayEnabled: false,
-        relatedOverlayOpacity: 50,
+        relatedOverlayOpacity: 10,
         relatedOverlayIndex: 0,
     },
     imageFilters: [],
