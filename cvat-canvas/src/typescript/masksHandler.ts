@@ -14,6 +14,8 @@ import {
     PropType, computeWrappingBox, imageDataToRLE, RLEToImageData, imageDataToDataURL,
 } from './shared';
 
+const LASSO_MIN_POINT_DISTANCE = 2;
+
 interface WrappingBBox {
     left: number;
     top: number;
@@ -62,6 +64,8 @@ export class MasksHandlerImpl implements MasksHandler {
     private brushMarker: fabric.Rect | fabric.Circle | null;
     private drawablePolygon: null | fabric.Polygon;
     private isPolygonDrawing: boolean;
+    private lassoPoints: fabric.Point[] | null;
+    private lassoPreviewPolyline: fabric.Polyline | null;
     private drawnObjects: DrawnObject[];
     private undoStack: HistoryAction[];
     private redoStack: HistoryAction[];
@@ -86,6 +90,35 @@ export class MasksHandlerImpl implements MasksHandler {
         canvasWrapper.style.zIndex = '';
         this.isPolygonDrawing = false;
         this.vectorDrawHandler.draw({ enabled: false }, this.geometry);
+    }
+
+    private removeLassoPreview(): void {
+        if (this.lassoPreviewPolyline) {
+            this.canvas.remove(this.lassoPreviewPolyline);
+            this.lassoPreviewPolyline = null;
+        }
+    }
+
+    private finishLassoTrace(): void {
+        const points = this.lassoPoints;
+        this.lassoPoints = null;
+        this.removeLassoPreview();
+
+        if (!points || points.length < 3 || !this.tool) return;
+
+        const color = fabric.Color.fromHex(this.tool.color);
+        color.setAlpha(this.tool.type === 'lasso-minus' ? 1 : this.drawingOpacity);
+        const polygon = new fabric.Polygon(points, {
+            fill: color.toRgba(),
+            selectable: false,
+            objectCaching: false,
+            absolutePositioned: true,
+            globalCompositeOperation: this.tool.type === 'lasso-minus' ? 'destination-out' : 'xor',
+        });
+
+        this.startHistoryAction();
+        this.addDrawnObject(polygon);
+        this.canvas.renderAll();
     }
 
     private removeBrushMarker(): void {
@@ -142,6 +175,8 @@ export class MasksHandlerImpl implements MasksHandler {
 
     private releaseDraw(): void {
         this.removeBrushMarker();
+        this.removeLassoPreview();
+        this.lassoPoints = null;
         this.releaseCanvasWrapperCSS();
         if (this.isPolygonDrawing) {
             this.isPolygonDrawing = false;
@@ -158,6 +193,8 @@ export class MasksHandlerImpl implements MasksHandler {
 
     private releaseEdit(): void {
         this.removeBrushMarker();
+        this.removeLassoPreview();
+        this.lassoPoints = null;
         this.releaseCanvasWrapperCSS();
         if (this.isPolygonDrawing) {
             this.isPolygonDrawing = false;
@@ -255,6 +292,8 @@ export class MasksHandlerImpl implements MasksHandler {
             eraser: 'Erase mask stroke',
             'polygon-plus': 'Add polygon to mask',
             'polygon-minus': 'Subtract polygon from mask',
+            'lasso-plus': 'Add lasso trace to mask',
+            'lasso-minus': 'Subtract lasso trace from mask',
         };
         return this.tool ? descriptions[this.tool.type] : 'Edit mask';
     }
@@ -386,6 +425,7 @@ export class MasksHandlerImpl implements MasksHandler {
             this.tool.onBlockUpdated({
                 eraser: true,
                 'polygon-minus': true,
+                'lasso-minus': true,
             });
             return;
         }
@@ -402,6 +442,7 @@ export class MasksHandlerImpl implements MasksHandler {
         this.tool.onBlockUpdated({
             eraser: isEmptyMask,
             'polygon-minus': isEmptyMask,
+            'lasso-minus': isEmptyMask,
         });
     }
 
@@ -433,6 +474,8 @@ export class MasksHandlerImpl implements MasksHandler {
         this.isMouseDown = false;
         this.isBrushSizeChanging = false;
         this.isPolygonDrawing = false;
+        this.lassoPoints = null;
+        this.lassoPreviewPolyline = null;
         this.drawData = null;
         this.editData = null;
         this.drawingOpacity = 0.5;
@@ -458,6 +501,9 @@ export class MasksHandlerImpl implements MasksHandler {
         this.canvas.getElement().parentElement.addEventListener('contextmenu', (e: MouseEvent) => e.preventDefault());
         this.latestMousePos = { x: -1, y: -1 };
         window.document.addEventListener('mouseup', () => {
+            if (this.lassoPoints) {
+                this.finishLassoTrace();
+            }
             this.finishHistoryAction();
             this.isMouseDown = false;
             this.isBrushSizeChanging = false;
@@ -468,8 +514,12 @@ export class MasksHandlerImpl implements MasksHandler {
             this.isMouseDown = (isDrawing || isEditing) && options.e.button === 0 && !options.e.altKey;
             this.isBrushSizeChanging = (isDrawing || isEditing) && options.e.button === 2 && options.e.altKey;
 
-            if (this.isMouseDown && !isInsertion && ['brush', 'eraser'].includes(this.tool?.type)) {
-                this.startHistoryAction();
+            if (this.isMouseDown && !isInsertion) {
+                if (['brush', 'eraser'].includes(this.tool?.type)) {
+                    this.startHistoryAction();
+                } else if (['lasso-plus', 'lasso-minus'].includes(this.tool?.type)) {
+                    this.lassoPoints = [];
+                }
             }
 
             if (isInsertion) {
@@ -609,6 +659,29 @@ export class MasksHandlerImpl implements MasksHandler {
                     }
                 }
                 this.canvas.renderAll();
+            } else if (
+                isMouseDown && !this.isHidden && !isBrushSizeChanging &&
+                ['lasso-plus', 'lasso-minus'].includes(tool?.type) && this.lassoPoints
+            ) {
+                const lastPoint = this.lassoPoints[this.lassoPoints.length - 1];
+                const distance = lastPoint ? Math.hypot(position.x - lastPoint.x, position.y - lastPoint.y) : Infinity;
+                if (distance >= LASSO_MIN_POINT_DISTANCE) {
+                    this.lassoPoints.push(new fabric.Point(position.x, position.y));
+
+                    this.removeLassoPreview();
+                    const color = fabric.Color.fromHex(tool.color);
+                    color.setAlpha(1);
+                    this.lassoPreviewPolyline = new fabric.Polyline(this.lassoPoints, {
+                        fill: '',
+                        stroke: color.toRgba(),
+                        strokeWidth: Math.max(1, consts.BASE_STROKE_WIDTH / (this.geometry.scale || 1)),
+                        selectable: false,
+                        evented: false,
+                        objectCaching: false,
+                    });
+                    this.canvas.add(this.lassoPreviewPolyline);
+                    this.canvas.renderAll();
+                }
             } else if (tool?.type.startsWith('polygon-') && this.drawablePolygon) {
                 // update the polygon position
                 const points = this.drawablePolygon.get('points');

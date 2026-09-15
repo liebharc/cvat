@@ -125,11 +125,11 @@ export interface Configuration {
 }
 
 export interface BrushTool {
-    type: 'brush' | 'eraser' | 'polygon-plus' | 'polygon-minus';
+    type: 'brush' | 'eraser' | 'polygon-plus' | 'polygon-minus' | 'lasso-plus' | 'lasso-minus';
     color: string;
     form: 'circle' | 'square';
     size: number;
-    onBlockUpdated: (blockedTools: Record<'eraser' | 'polygon-minus', boolean>) => void;
+    onBlockUpdated: (blockedTools: Record<'eraser' | 'polygon-minus' | 'lasso-minus', boolean>) => void;
 }
 
 export interface DrawData {

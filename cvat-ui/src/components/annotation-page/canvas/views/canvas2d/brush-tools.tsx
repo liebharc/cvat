@@ -19,7 +19,7 @@ import {
 } from 'cvat-core-wrapper';
 import { Canvas, CanvasMode } from 'cvat-canvas-wrapper';
 import {
-    BrushIcon, EraserIcon, PolygonMinusIcon, PolygonPlusIcon,
+    BrushIcon, EraserIcon, PolygonMinusIcon, PolygonPlusIcon, LassoPlusIcon, LassoMinusIcon,
     PlusIcon, CheckIcon, MoveIcon,
 } from 'icons';
 import CVATTooltip from 'components/common/cvat-tooltip';
@@ -68,6 +68,20 @@ const componentShortcuts = {
         scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
         displayWeight: 25,
     },
+    ACTIVATE_LASSO_TOOL_STANDARD_CONTROLS: {
+        name: 'Lasso tool',
+        description: 'Activate lasso tool on masks drawing toolbox',
+        sequences: ['shift+5'],
+        scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
+        displayWeight: 30,
+    },
+    ACTIVATE_LASSO_REMOVE_TOOL_STANDARD_CONTROLS: {
+        name: 'Lasso remove tool',
+        description: 'Activate lasso remove tool on masks drawing toolbox',
+        sequences: ['shift+6'],
+        scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
+        displayWeight: 35,
+    },
 };
 registerComponentShortcuts(componentShortcuts);
 
@@ -87,15 +101,18 @@ function BrushTools(): React.ReactPortal | null {
     }), shallowEqual);
 
     const [editableState, setEditableState] = useState<any | null>(null);
-    const [currentTool, setCurrentTool] = useState<'brush' | 'eraser' | 'polygon-plus' | 'polygon-minus'>('brush');
+    const [currentTool, setCurrentTool] = useState<
+    'brush' | 'eraser' | 'polygon-plus' | 'polygon-minus' | 'lasso-plus' | 'lasso-minus'
+    >('brush');
     const [brushForm, setBrushForm] = useState<'circle' | 'square'>('circle');
     const [[top, left], setTopLeft] = useState([0, 0]);
     const [brushSize, setBrushSize] = useState(10);
     const [applicableLabels, setApplicableLabels] = useState<Label[]>([]);
 
-    const [blockedTools, setBlockedTools] = useState<Record<'eraser' | 'polygon-minus', boolean>>({
+    const [blockedTools, setBlockedTools] = useState<Record<'eraser' | 'polygon-minus' | 'lasso-minus', boolean>>({
         eraser: false,
         'polygon-minus': false,
+        'lasso-minus': false,
     });
 
     const setBrushTool = useCallback(() => setCurrentTool('brush'), [setCurrentTool]);
@@ -110,6 +127,12 @@ function BrushTools(): React.ReactPortal | null {
             setCurrentTool('polygon-minus');
         }
     }, [setCurrentTool, blockedTools['polygon-minus']]);
+    const setLassoTool = useCallback(() => setCurrentTool('lasso-plus'), [setCurrentTool]);
+    const setLassoRemoveTool = useCallback(() => {
+        if (!blockedTools['lasso-minus']) {
+            setCurrentTool('lasso-minus');
+        }
+    }, [setCurrentTool, blockedTools['lasso-minus']]);
 
     const hideMask = useCallback((hide: boolean) => {
         dispatch(changeHideActiveObjectAsync(hide));
@@ -120,6 +143,8 @@ function BrushTools(): React.ReactPortal | null {
         ACTIVATE_ERASER_TOOL_STANDARD_CONTROLS: setEraserTool,
         ACTIVATE_POLYGON_TOOL_STANDARD_CONTROLS: setPolygonTool,
         ACTIVATE_POLYGON_REMOVE_TOOL_STANDARD_CONTROLS: setPolygonRemoveTool,
+        ACTIVATE_LASSO_TOOL_STANDARD_CONTROLS: setLassoTool,
+        ACTIVATE_LASSO_REMOVE_TOOL_STANDARD_CONTROLS: setLassoRemoveTool,
     };
 
     const [removeUnderlyingPixels, setRemoveUnderlyingPixels] = useState(false);
@@ -212,7 +237,7 @@ function BrushTools(): React.ReactPortal | null {
 
     useEffect(() => {
         const resetCurrentTool = (): void => {
-            if (['eraser', 'polygon-minus'].includes(currentTool)) {
+            if (['eraser', 'polygon-minus', 'lasso-minus'].includes(currentTool)) {
                 setCurrentTool('brush');
             }
         };
@@ -349,6 +374,23 @@ function BrushTools(): React.ReactPortal | null {
                     icon={<Icon component={PolygonMinusIcon} />}
                     onClick={setPolygonRemoveTool}
                     disabled={blockedTools['polygon-minus']}
+                />
+            </CVATTooltip>
+            <CVATTooltip title={`Lasso tool ${normalizedKeyMap.ACTIVATE_LASSO_TOOL_STANDARD_CONTROLS}`}>
+                <Button
+                    type='text'
+                    className={['cvat-brush-tools-lasso-plus', ...(currentTool === 'lasso-plus' ? ['cvat-brush-tools-active-tool'] : [])].join(' ')}
+                    icon={<Icon component={LassoPlusIcon} />}
+                    onClick={setLassoTool}
+                />
+            </CVATTooltip>
+            <CVATTooltip title={`Lasso remove tool ${normalizedKeyMap.ACTIVATE_LASSO_REMOVE_TOOL_STANDARD_CONTROLS}`}>
+                <Button
+                    type='text'
+                    className={['cvat-brush-tools-lasso-minus', ...(currentTool === 'lasso-minus' ? ['cvat-brush-tools-active-tool'] : [])].join(' ')}
+                    icon={<Icon component={LassoMinusIcon} />}
+                    onClick={setLassoRemoveTool}
+                    disabled={blockedTools['lasso-minus']}
                 />
             </CVATTooltip>
             { ['brush', 'eraser'].includes(currentTool) ? (
