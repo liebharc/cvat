@@ -125,7 +125,7 @@ export interface Configuration {
 }
 
 export interface BrushTool {
-    type: 'brush' | 'eraser' | 'polygon-plus' | 'polygon-minus' | 'lasso-plus' | 'lasso-minus';
+    type: 'brush' | 'eraser' | 'polygon-plus' | 'polygon-minus' | 'lasso-plus' | 'lasso-minus' | 'bucket-fill';
     color: string;
     form: 'circle' | 'square';
     size: number;

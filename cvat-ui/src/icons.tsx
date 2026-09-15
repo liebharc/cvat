@@ -62,6 +62,7 @@ import SVGPolygonPlusIcon from './assets/polygon-plus.svg';
 import SVGPolygonMinusIcon from './assets/polygon-minus.svg';
 import SVGLassoPlusIcon from './assets/lasso-plus.svg';
 import SVGLassoMinusIcon from './assets/lasso-minus.svg';
+import SVGBucketFillIcon from './assets/bucket-fill-icon.svg';
 import SVGMultiPlusIcon from './assets/multi-plus-icon.svg';
 import SVGBackArrowIcon from './assets/back-arrow-icon.svg';
 import SVGClearIcon from './assets/clear-icon.svg';
@@ -143,6 +144,7 @@ export const PolygonPlusIcon = React.memo((): JSX.Element => <SVGPolygonPlusIcon
 export const PolygonMinusIcon = React.memo((): JSX.Element => <SVGPolygonMinusIcon />);
 export const LassoPlusIcon = React.memo((): JSX.Element => <SVGLassoPlusIcon />);
 export const LassoMinusIcon = React.memo((): JSX.Element => <SVGLassoMinusIcon />);
+export const BucketFillIcon = React.memo((): JSX.Element => <SVGBucketFillIcon />);
 export const MultiPlusIcon = React.memo((): JSX.Element => <SVGMultiPlusIcon />);
 export const BackArrowIcon = React.memo((): JSX.Element => <SVGBackArrowIcon />);
 export const ClearIcon = React.memo((): JSX.Element => <SVGClearIcon />);

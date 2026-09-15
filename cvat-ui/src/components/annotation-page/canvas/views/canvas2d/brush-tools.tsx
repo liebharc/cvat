@@ -19,7 +19,7 @@ import {
 } from 'cvat-core-wrapper';
 import { Canvas, CanvasMode } from 'cvat-canvas-wrapper';
 import {
-    BrushIcon, EraserIcon, PolygonMinusIcon, PolygonPlusIcon, LassoPlusIcon, LassoMinusIcon,
+    BrushIcon, EraserIcon, PolygonMinusIcon, PolygonPlusIcon, LassoPlusIcon, LassoMinusIcon, BucketFillIcon,
     PlusIcon, CheckIcon, MoveIcon,
 } from 'icons';
 import CVATTooltip from 'components/common/cvat-tooltip';
@@ -82,6 +82,13 @@ const componentShortcuts = {
         scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
         displayWeight: 35,
     },
+    ACTIVATE_BUCKET_FILL_TOOL_STANDARD_CONTROLS: {
+        name: 'Bucket fill tool',
+        description: 'Activate bucket fill tool on masks drawing toolbox',
+        sequences: ['shift+7'],
+        scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
+        displayWeight: 40,
+    },
 };
 registerComponentShortcuts(componentShortcuts);
 
@@ -102,7 +109,7 @@ function BrushTools(): React.ReactPortal | null {
 
     const [editableState, setEditableState] = useState<any | null>(null);
     const [currentTool, setCurrentTool] = useState<
-    'brush' | 'eraser' | 'polygon-plus' | 'polygon-minus' | 'lasso-plus' | 'lasso-minus'
+    'brush' | 'eraser' | 'polygon-plus' | 'polygon-minus' | 'lasso-plus' | 'lasso-minus' | 'bucket-fill'
     >('brush');
     const [brushForm, setBrushForm] = useState<'circle' | 'square'>('circle');
     const [[top, left], setTopLeft] = useState([0, 0]);
@@ -133,6 +140,7 @@ function BrushTools(): React.ReactPortal | null {
             setCurrentTool('lasso-minus');
         }
     }, [setCurrentTool, blockedTools['lasso-minus']]);
+    const setBucketFillTool = useCallback(() => setCurrentTool('bucket-fill'), [setCurrentTool]);
 
     const hideMask = useCallback((hide: boolean) => {
         dispatch(changeHideActiveObjectAsync(hide));
@@ -145,6 +153,7 @@ function BrushTools(): React.ReactPortal | null {
         ACTIVATE_POLYGON_REMOVE_TOOL_STANDARD_CONTROLS: setPolygonRemoveTool,
         ACTIVATE_LASSO_TOOL_STANDARD_CONTROLS: setLassoTool,
         ACTIVATE_LASSO_REMOVE_TOOL_STANDARD_CONTROLS: setLassoRemoveTool,
+        ACTIVATE_BUCKET_FILL_TOOL_STANDARD_CONTROLS: setBucketFillTool,
     };
 
     const [removeUnderlyingPixels, setRemoveUnderlyingPixels] = useState(false);
@@ -391,6 +400,14 @@ function BrushTools(): React.ReactPortal | null {
                     icon={<Icon component={LassoMinusIcon} />}
                     onClick={setLassoRemoveTool}
                     disabled={blockedTools['lasso-minus']}
+                />
+            </CVATTooltip>
+            <CVATTooltip title={`Bucket fill tool ${normalizedKeyMap.ACTIVATE_BUCKET_FILL_TOOL_STANDARD_CONTROLS}`}>
+                <Button
+                    type='text'
+                    className={['cvat-brush-tools-bucket-fill', ...(currentTool === 'bucket-fill' ? ['cvat-brush-tools-active-tool'] : [])].join(' ')}
+                    icon={<Icon component={BucketFillIcon} />}
+                    onClick={setBucketFillTool}
                 />
             </CVATTooltip>
             { ['brush', 'eraser'].includes(currentTool) ? (

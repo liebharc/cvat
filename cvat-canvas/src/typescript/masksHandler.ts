@@ -15,6 +15,7 @@ import {
 } from './shared';
 
 const LASSO_MIN_POINT_DISTANCE = 2;
+const BUCKET_FILL_GROW_PIXELS = 2;
 
 interface WrappingBBox {
     left: number;
@@ -66,6 +67,7 @@ export class MasksHandlerImpl implements MasksHandler {
     private isPolygonDrawing: boolean;
     private lassoPoints: fabric.Point[] | null;
     private lassoPreviewPolyline: fabric.Polyline | null;
+    private bucketFillPending: boolean;
     private drawnObjects: DrawnObject[];
     private undoStack: HistoryAction[];
     private redoStack: HistoryAction[];
@@ -119,6 +121,123 @@ export class MasksHandlerImpl implements MasksHandler {
         this.startHistoryAction();
         this.addDrawnObject(polygon);
         this.canvas.renderAll();
+    }
+
+    private bucketFill(x: number, y: number): void {
+        if (!this.tool) return;
+        const { width, height } = this.geometry.image;
+        const startX = Math.floor(x);
+        const startY = Math.floor(y);
+        if (startX < 0 || startY < 0 || startX >= width || startY >= height) return;
+
+        const { data } = this.canvas.toCanvasElement().getContext('2d').getImageData(0, 0, width, height);
+        const startPos = startY * width + startX;
+        if (data[startPos * 4 + 3] > 0) return; // clicked on an already painted pixel, nothing to fill
+
+        const visited = new Uint8Array(width * height);
+        const stack = [startPos];
+        visited[startPos] = 1;
+
+        let minX = startX;
+        let maxX = startX;
+        let minY = startY;
+        let maxY = startY;
+        const filled: number[] = [];
+        const boundary = new Set<number>();
+
+        while (stack.length) {
+            const pos = stack.pop() as number;
+            const px = pos % width;
+            const py = (pos - px) / width;
+            filled.push(pos);
+            minX = Math.min(minX, px);
+            maxX = Math.max(maxX, px);
+            minY = Math.min(minY, py);
+            maxY = Math.max(maxY, py);
+
+            // 8-connected: brush strokes rendered from overlapping round dabs can leave
+            // diagonally-adjacent unpainted pixels at tight curves; 4-connectivity alone
+            // leaves those as visible pinholes in an otherwise fully enclosed fill.
+            const hasLeft = px > 0;
+            const hasRight = px < width - 1;
+            const hasUp = py > 0;
+            const hasDown = py < height - 1;
+            const neighbors = [
+                hasLeft ? pos - 1 : -1,
+                hasRight ? pos + 1 : -1,
+                hasUp ? pos - width : -1,
+                hasDown ? pos + width : -1,
+                hasLeft && hasUp ? pos - width - 1 : -1,
+                hasRight && hasUp ? pos - width + 1 : -1,
+                hasLeft && hasDown ? pos + width - 1 : -1,
+                hasRight && hasDown ? pos + width + 1 : -1,
+            ];
+            for (const neighbor of neighbors) {
+                if (neighbor < 0) continue;
+                if (data[neighbor * 4 + 3] > 0) {
+                    boundary.add(pos); // this filled pixel touches the enclosing stroke
+                    continue;
+                }
+                if (visited[neighbor]) continue;
+                visited[neighbor] = 1;
+                stack.push(neighbor);
+            }
+        }
+
+        // Grow the filled region a couple of pixels past the flood-fill boundary so it
+        // deliberately overlaps the enclosing stroke, instead of stopping exactly at its edge.
+        // Real brush strokes are made of overlapping round dabs and can have thin, irregular
+        // anti-aliased or under-covered pixels right at their edge; painting only up to those
+        // pixels (and not over them) can leave a hairline of background visible between the
+        // fill and the stroke. Overlap is safe here: compositing more of the same half-opacity
+        // fill color onto already-painted pixels just reinforces them. Only pixels touching the
+        // boundary need to grow, not the whole (potentially huge) filled interior.
+        const dilated = new Set<number>(filled);
+        for (const pos of boundary) {
+            const px = pos % width;
+            const py = (pos - px) / width;
+            for (let dy = -BUCKET_FILL_GROW_PIXELS; dy <= BUCKET_FILL_GROW_PIXELS; dy += 1) {
+                const ny = py + dy;
+                if (ny < 0 || ny >= height) continue;
+                for (let dx = -BUCKET_FILL_GROW_PIXELS; dx <= BUCKET_FILL_GROW_PIXELS; dx += 1) {
+                    const nx = px + dx;
+                    if (nx < 0 || nx >= width) continue;
+                    dilated.add(ny * width + nx);
+                }
+            }
+        }
+        minX = Math.max(0, minX - BUCKET_FILL_GROW_PIXELS);
+        maxX = Math.min(width - 1, maxX + BUCKET_FILL_GROW_PIXELS);
+        minY = Math.max(0, minY - BUCKET_FILL_GROW_PIXELS);
+        maxY = Math.min(height - 1, maxY + BUCKET_FILL_GROW_PIXELS);
+
+        const fillWidth = maxX - minX + 1;
+        const fillHeight = maxY - minY + 1;
+        const fillImageData = new Uint8ClampedArray(fillWidth * fillHeight * 4);
+        const [r, g, b] = fabric.Color.fromHex(this.tool.color).getSource();
+        const alpha = Math.round(this.drawingOpacity * 255);
+        for (const pos of dilated) {
+            const px = pos % width;
+            const py = (pos - px) / width;
+            const localIdx = ((py - minY) * fillWidth + (px - minX)) * 4;
+            fillImageData[localIdx] = r;
+            fillImageData[localIdx + 1] = g;
+            fillImageData[localIdx + 2] = b;
+            fillImageData[localIdx + 3] = alpha;
+        }
+
+        imageDataToDataURL(fillImageData, fillWidth, fillHeight, (dataURL: string) => {
+            fabric.Image.fromURL(dataURL, (image: fabric.Image) => {
+                URL.revokeObjectURL(dataURL);
+                image.selectable = false;
+                image.evented = false;
+                image.globalCompositeOperation = 'xor';
+                this.startHistoryAction();
+                this.addDrawnObject(image);
+                this.finishHistoryAction();
+                this.canvas.renderAll();
+            }, { left: minX, top: minY });
+        });
     }
 
     private removeBrushMarker(): void {
@@ -177,6 +296,7 @@ export class MasksHandlerImpl implements MasksHandler {
         this.removeBrushMarker();
         this.removeLassoPreview();
         this.lassoPoints = null;
+        this.bucketFillPending = false;
         this.releaseCanvasWrapperCSS();
         if (this.isPolygonDrawing) {
             this.isPolygonDrawing = false;
@@ -195,6 +315,7 @@ export class MasksHandlerImpl implements MasksHandler {
         this.removeBrushMarker();
         this.removeLassoPreview();
         this.lassoPoints = null;
+        this.bucketFillPending = false;
         this.releaseCanvasWrapperCSS();
         if (this.isPolygonDrawing) {
             this.isPolygonDrawing = false;
@@ -294,6 +415,7 @@ export class MasksHandlerImpl implements MasksHandler {
             'polygon-minus': 'Subtract polygon from mask',
             'lasso-plus': 'Add lasso trace to mask',
             'lasso-minus': 'Subtract lasso trace from mask',
+            'bucket-fill': 'Fill area of mask',
         };
         return this.tool ? descriptions[this.tool.type] : 'Edit mask';
     }
@@ -476,6 +598,7 @@ export class MasksHandlerImpl implements MasksHandler {
         this.isPolygonDrawing = false;
         this.lassoPoints = null;
         this.lassoPreviewPolyline = null;
+        this.bucketFillPending = false;
         this.drawData = null;
         this.editData = null;
         this.drawingOpacity = 0.5;
@@ -519,6 +642,8 @@ export class MasksHandlerImpl implements MasksHandler {
                     this.startHistoryAction();
                 } else if (['lasso-plus', 'lasso-minus'].includes(this.tool?.type)) {
                     this.lassoPoints = [];
+                } else if (this.tool?.type === 'bucket-fill') {
+                    this.bucketFillPending = true;
                 }
             }
 
@@ -682,6 +807,12 @@ export class MasksHandlerImpl implements MasksHandler {
                     this.canvas.add(this.lassoPreviewPolyline);
                     this.canvas.renderAll();
                 }
+            } else if (
+                isMouseDown && !this.isHidden && !isBrushSizeChanging &&
+                tool?.type === 'bucket-fill' && this.bucketFillPending
+            ) {
+                this.bucketFillPending = false;
+                this.bucketFill(position.x, position.y);
             } else if (tool?.type.startsWith('polygon-') && this.drawablePolygon) {
                 // update the polygon position
                 const points = this.drawablePolygon.get('points');
