@@ -167,13 +167,13 @@ const componentShortcuts = {
     TO_BACKGROUND: {
         name: 'Move to background',
         description: 'Move an active object to the newly created background layer (decrease z-order value)',
-        sequences: ['-', '_'],
+        sequences: [],
         scope: ShortcutScope.OBJECTS_SIDEBAR,
     },
     TO_FOREGROUND: {
         name: 'Move to foreground',
         description: 'Move an active object to the newly created foreground layer (increase z-order value)',
-        sequences: ['+', '='],
+        sequences: [],
         scope: ShortcutScope.OBJECTS_SIDEBAR,
     },
     TO_ONE_LAYER_BACKWARD: {

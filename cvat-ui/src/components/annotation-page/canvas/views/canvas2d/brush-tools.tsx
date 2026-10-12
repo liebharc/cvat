@@ -89,10 +89,25 @@ const componentShortcuts = {
         scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
         displayWeight: 40,
     },
+    INCREASE_BRUSH_SIZE_STANDARD_CONTROLS: {
+        name: 'Increase brush size',
+        description: 'Increase brush or eraser size on masks drawing toolbox. Hold to change it faster',
+        sequences: ['+', '='],
+        scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
+        displayWeight: 45,
+    },
+    DECREASE_BRUSH_SIZE_STANDARD_CONTROLS: {
+        name: 'Decrease brush size',
+        description: 'Decrease brush or eraser size on masks drawing toolbox. Hold to change it faster',
+        sequences: ['-', '_'],
+        scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
+        displayWeight: 50,
+    },
 };
 registerComponentShortcuts(componentShortcuts);
 
 const MIN_BRUSH_SIZE = 1;
+const BRUSH_SIZE_HOLD_FACTOR = 0.05;
 function BrushTools(): React.ReactPortal | null {
     const dispatch = useDispatch();
     const {
@@ -146,6 +161,18 @@ function BrushTools(): React.ReactPortal | null {
         dispatch(changeHideActiveObjectAsync(hide));
     }, []);
 
+    const changeBrushSize = useCallback((direction: 1 | -1, event?: KeyboardEvent) => {
+        if (!visible || !['brush', 'eraser'].includes(currentTool)) {
+            return;
+        }
+
+        setBrushSize((size) => {
+            // a single press changes the size by one pixel, holding the key speeds it up
+            const step = event?.repeat ? Math.max(1, Math.round(size * BRUSH_SIZE_HOLD_FACTOR)) : 1;
+            return Math.max(MIN_BRUSH_SIZE, size + direction * step);
+        });
+    }, [visible, currentTool]);
+
     const handlers: Record<keyof typeof componentShortcuts, (event?: KeyboardEvent) => void> = {
         ACTIVATE_BRUSH_TOOL_STANDARD_CONTROLS: setBrushTool,
         ACTIVATE_ERASER_TOOL_STANDARD_CONTROLS: setEraserTool,
@@ -154,6 +181,8 @@ function BrushTools(): React.ReactPortal | null {
         ACTIVATE_LASSO_TOOL_STANDARD_CONTROLS: setLassoTool,
         ACTIVATE_LASSO_REMOVE_TOOL_STANDARD_CONTROLS: setLassoRemoveTool,
         ACTIVATE_BUCKET_FILL_TOOL_STANDARD_CONTROLS: setBucketFillTool,
+        INCREASE_BRUSH_SIZE_STANDARD_CONTROLS: (event?: KeyboardEvent) => changeBrushSize(1, event),
+        DECREASE_BRUSH_SIZE_STANDARD_CONTROLS: (event?: KeyboardEvent) => changeBrushSize(-1, event),
     };
 
     const [removeUnderlyingPixels, setRemoveUnderlyingPixels] = useState(false);
@@ -411,7 +440,11 @@ function BrushTools(): React.ReactPortal | null {
                 />
             </CVATTooltip>
             { ['brush', 'eraser'].includes(currentTool) ? (
-                <CVATTooltip title='Brush size [Hold Alt + Right Mouse Click + Drag Left/Right]'>
+                <CVATTooltip title={
+                    `Brush size ${normalizedKeyMap.DECREASE_BRUSH_SIZE_STANDARD_CONTROLS} ` +
+                        `${normalizedKeyMap.INCREASE_BRUSH_SIZE_STANDARD_CONTROLS} ` +
+                        '[Hold Alt + Right Mouse Click + Drag Left/Right]'
+                }>
                     <InputNumber
                         className='cvat-brush-tools-brush-size'
                         value={brushSize}
