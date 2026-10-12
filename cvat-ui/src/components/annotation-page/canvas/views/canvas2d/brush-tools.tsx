@@ -92,14 +92,14 @@ const componentShortcuts = {
     INCREASE_BRUSH_SIZE_STANDARD_CONTROLS: {
         name: 'Increase brush size',
         description: 'Increase brush or eraser size on masks drawing toolbox. Hold to change it faster',
-        sequences: ['+', '='],
+        sequences: ['.'],
         scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
         displayWeight: 45,
     },
     DECREASE_BRUSH_SIZE_STANDARD_CONTROLS: {
         name: 'Decrease brush size',
         description: 'Decrease brush or eraser size on masks drawing toolbox. Hold to change it faster',
-        sequences: ['-', '_'],
+        sequences: [','],
         scope: ShortcutScope.STANDARD_WORKSPACE_CONTROLS,
         displayWeight: 50,
     },

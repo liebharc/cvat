@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-export const SHORTCUTS_SETTINGS_VERSION = 2;
+export const SHORTCUTS_SETTINGS_VERSION = 1;
 
 type SerializedShortcuts = {
     version?: number;
@@ -25,16 +25,6 @@ const shortcutsMigrations: Record<number, (shortcuts: SerializedShortcuts) => vo
             const shortcut = shortcuts.keyMap[shortcutID];
             if (shortcut && !shortcut.sequences.includes(commandSequence)) {
                 shortcut.sequences.push(commandSequence);
-            }
-        });
-    },
-    2: (shortcuts: SerializedShortcuts): void => {
-        // these keys are used to change brush size now
-        const releasedSequences = ['+', '=', '-', '_'];
-        ['TO_BACKGROUND', 'TO_FOREGROUND'].forEach((shortcutID) => {
-            const shortcut = shortcuts.keyMap[shortcutID];
-            if (shortcut) {
-                shortcut.sequences = shortcut.sequences.filter((sequence) => !releasedSequences.includes(sequence));
             }
         });
     },
