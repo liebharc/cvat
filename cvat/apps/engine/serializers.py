@@ -47,7 +47,7 @@ from cvat.apps.engine.cloud_provider import (
 )
 from cvat.apps.engine.label_colors import get_label_color
 from cvat.apps.engine.log import ServerLogManager
-from cvat.apps.engine.media_io.frame_provider import TaskFrameProvider
+from cvat.apps.engine.media_io.frame_provider import SegmentFrameProvider, TaskFrameProvider
 from cvat.apps.engine.permissions import ProjectPermission, TaskPermission
 from cvat.apps.engine.rq import RunningBackgroundProcessesError, update_org_related_data_in_rq_jobs
 from cvat.apps.engine.task import ensure_task_is_initialized
@@ -3738,6 +3738,53 @@ class DataMetaReadSerializer(serializers.ModelSerializer):
         return serialized
 
 
+def _invalidate_chunks_with_changed_deleted_frames(
+    db_task: models.Task, old_deleted_frames: Iterable[int], new_deleted_frames: Iterable[int]
+) -> None:
+    """
+    Deleted image frames are replaced with a placeholder in chunks, so the chunks
+    with deleted or restored frames have to be rebuilt.
+    """
+    db_data = db_task.require_data()
+    changed_frames = set(old_deleted_frames).symmetric_difference(new_deleted_frames)
+    if (
+        not changed_frames
+        or db_task.media_type != models.MediaType.IMAGE
+        or db_task.dimension != models.DimensionType.DIM_2D
+        or hasattr(db_data, "video")
+    ):
+        return
+
+    from cvat.apps.engine.cache import MediaCache
+
+    task_frame_provider = TaskFrameProvider(db_task)
+    changed_abs_frames = set(map(task_frame_provider.get_abs_frame_number, changed_frames))
+    changed_task_chunks = {frame // db_data.chunk_size for frame in changed_frames}
+    updated_segments = [
+        db_segment
+        for db_segment in db_task.segment_set.all()
+        if not changed_abs_frames.isdisjoint(db_segment.frame_set)
+    ]
+
+    def _remove_cached_chunks():
+        media_cache = MediaCache()
+        for quality in models.FrameQuality:
+            for chunk_number in changed_task_chunks:
+                media_cache.remove_task_chunk(db_task, chunk_number, quality=quality)
+
+            for db_segment in updated_segments:
+                SegmentFrameProvider(db_segment).invalidate_chunks(quality=quality)
+                for chunk_number in changed_task_chunks:
+                    media_cache.remove_segment_task_chunk(db_segment, chunk_number, quality=quality)
+
+    transaction.on_commit(_remove_cached_chunks)
+
+    # Make clients drop their cached chunks
+    models.Segment.objects.filter(id__in=[s.id for s in updated_segments]).update(
+        chunks_updated_date=timezone.now()
+    )
+
+
 class DataMetaWriteSerializer(serializers.ModelSerializer):
     deleted_frames = serializers.ListField(
         child=serializers.IntegerField(min_value=0), required=False
@@ -3794,8 +3841,13 @@ class DataMetaWriteSerializer(serializers.ModelSerializer):
         return requested_deleted_frames
 
     def update(self, instance: models.Data, validated_data):
+        old_deleted_frames = list(instance.deleted_frames)
         instance = super().update(instance, validated_data)
         db_task = models.Task.objects.filter(data=instance).first()
+        if db_task and "deleted_frames" in validated_data:
+            _invalidate_chunks_with_changed_deleted_frames(
+                db_task, old_deleted_frames, instance.deleted_frames
+            )
         if validated_data.get("cloud_storage_id"):
             task_frame_provider = TaskFrameProvider(db_task)
             for quality in models.FrameQuality:
@@ -3875,8 +3927,12 @@ class JobDataMetaWriteSerializer(serializers.ModelSerializer):
             db_data.validation_layout.save(update_fields=["disabled_frames"])
 
         if updated_deleted_task_frames is not None:
+            _invalidate_chunks_with_changed_deleted_frames(
+                db_task, db_data.deleted_frames, updated_deleted_task_frames
+            )
             db_data.deleted_frames = updated_deleted_task_frames
             db_data.save(update_fields=["deleted_frames"])
+            db_segment.refresh_from_db(fields=["chunks_updated_date"])
 
         db_task.touch()
         if db_task.project:

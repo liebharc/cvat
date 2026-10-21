@@ -24,6 +24,8 @@ import attrs
 import av
 import django_rq
 import PIL.Image
+import PIL.ImageDraw
+import PIL.ImageFont
 import PIL.ImageOps
 import rq
 from django.conf import settings
@@ -543,6 +545,13 @@ class MediaCache:
             self._make_chunk_key(db_task, chunk_number, quality=quality),
         )
 
+    def remove_segment_task_chunk(
+        self, db_segment: models.Segment, chunk_number: int, *, quality: models.FrameQuality
+    ) -> None:
+        self._delete_cache_item(
+            self._make_segment_task_chunk_key(db_segment, chunk_number, quality=quality)
+        )
+
     def remove_segment_preview(self, db_segment: models.Segment) -> None:
         self._delete_cache_item(self._make_preview_key(db_segment))
 
@@ -831,7 +840,89 @@ class MediaCache:
 
                 yield from reader.iterate_frames(frame_filter=frame_ids)
         else:
+            yield from MediaCache._read_raw_images_with_deleted_placeholders(db_task, frame_ids)
+
+    DELETED_FRAME_PLACEHOLDER_TEXT = (
+        "This image has been removed.\n"
+        "Please continue with the next image.\n"
+        "\n"
+        "Note: more than one image has been removed,\n"
+        "so you may see this message again."
+    )
+
+    @classmethod
+    def _make_deleted_frame_placeholder(cls, width: int, height: int) -> io.BytesIO:
+        image = PIL.Image.new("RGB", (width, height), (48, 48, 48))
+        draw = PIL.ImageDraw.Draw(image)
+
+        # Measure the text at a reference size, then scale it to fit the frame
+        reference_font_size = 100
+        left, top, right, bottom = draw.multiline_textbbox(
+            (0, 0),
+            cls.DELETED_FRAME_PLACEHOLDER_TEXT,
+            font=PIL.ImageFont.load_default(size=reference_font_size),
+            align="center",
+        )
+        scale = min(0.9 * width / max(right - left, 1), 0.9 * height / max(bottom - top, 1))
+        font = PIL.ImageFont.load_default(size=max(int(reference_font_size * scale), 1))
+
+        draw.multiline_text(
+            (width / 2, height / 2),
+            cls.DELETED_FRAME_PLACEHOLDER_TEXT,
+            font=font,
+            fill=(255, 255, 255),
+            anchor="mm",
+            align="center",
+        )
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
+    def _read_raw_images_with_deleted_placeholders(
+        db_task: models.Task, frame_ids: Sequence[int]
+    ) -> Generator[tuple[PIL.Image.Image | io.BytesIO | str, str], None, None]:
+        """
+        Reads the requested images, replacing deleted frames with a placeholder image.
+        Deleted frames are not read from the storage, as their source files can be removed.
+        """
+        db_data = db_task.require_data()
+
+        deleted_frame_ids = set()
+        if db_task.dimension == models.DimensionType.DIM_2D:
+            frame_step = db_data.get_frame_step()
+            deleted_frame_ids = {
+                db_data.start_frame + rel_frame * frame_step for rel_frame in db_data.deleted_frames
+            }.intersection(frame_ids)
+
+        if not deleted_frame_ids:
             yield from MediaCache.read_raw_images(db_task, frame_ids)
+            return
+
+        deleted_frame_sizes = {
+            frame: (width, height)
+            for frame, width, height in db_data.images.filter(
+                frame__in=deleted_frame_ids
+            ).values_list("frame", "width", "height")
+        }
+
+        existing_frame_ids = [f for f in frame_ids if f not in deleted_frame_ids]
+        with ExitStack() as es:
+            if existing_frame_ids:
+                images_iter = es.enter_context(
+                    closing(MediaCache.read_raw_images(db_task, existing_frame_ids))
+                )
+
+            for frame_id in frame_ids:
+                if frame_id in deleted_frame_ids:
+                    placeholder = MediaCache._make_deleted_frame_placeholder(
+                        *deleted_frame_sizes[frame_id]
+                    )
+                    yield placeholder, "deleted_frame.png"
+                else:
+                    yield next(images_iter)
 
     def prepare_segment_chunk(
         self,
