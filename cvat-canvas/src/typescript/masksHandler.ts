@@ -31,6 +31,8 @@ interface HistoryAction {
 }
 type HistoryChangedCallback = (undoAction?: string, redoAction?: string) => void;
 
+type CanvasWithTopContext = fabric.Canvas & { contextTop: CanvasRenderingContext2D };
+
 export interface MasksHandler {
     draw(drawData: DrawData): void;
     edit(state: MasksEditData): void;
@@ -240,11 +242,40 @@ export class MasksHandlerImpl implements MasksHandler {
         });
     }
 
+    private get topContext(): CanvasRenderingContext2D {
+        return (this.canvas as CanvasWithTopContext).contextTop;
+    }
+
+    private disableImageSmoothing(): void {
+        this.canvas.imageSmoothingEnabled = false;
+        this.canvas.getContext().imageSmoothingEnabled = false;
+        this.topContext.imageSmoothingEnabled = false;
+    }
+
+    private renderObject(ctx: CanvasRenderingContext2D, object: DrawnObject): void {
+        const [a, b, c, d, e, f] = this.canvas.viewportTransform;
+        ctx.save();
+        ctx.transform(a, b, c, d, e, f);
+        object.render(ctx);
+        ctx.restore();
+    }
+
+    private renderDrawnObject(object: DrawnObject): void {
+        this.renderObject(this.canvas.getContext(), object);
+    }
+
+    private renderBrushMarker(): void {
+        const ctx = this.topContext;
+        this.canvas.clearContext(ctx);
+        if (this.brushMarker) {
+            this.renderObject(ctx, this.brushMarker);
+        }
+    }
+
     private removeBrushMarker(): void {
         if (this.brushMarker) {
-            this.canvas.remove(this.brushMarker);
             this.brushMarker = null;
-            this.canvas.renderAll();
+            this.canvas.clearContext(this.topContext);
         }
     }
 
@@ -253,9 +284,10 @@ export class MasksHandlerImpl implements MasksHandler {
             const common = {
                 evented: false,
                 selectable: false,
+                objectCaching: false,
                 opacity: 0.75,
-                left: this.latestMousePos.x - this.tool.size / 2,
-                top: this.latestMousePos.y - this.tool.size / 2,
+                left: Math.round(this.latestMousePos.x - this.tool.size / 2),
+                top: Math.round(this.latestMousePos.y - this.tool.size / 2),
                 strokeWidth: 1,
                 stroke: 'white',
             };
@@ -269,7 +301,7 @@ export class MasksHandlerImpl implements MasksHandler {
             });
 
             this.canvas.defaultCursor = 'none';
-            this.canvas.add(this.brushMarker);
+            this.renderBrushMarker();
         } else {
             this.canvas.defaultCursor = 'inherit';
         }
@@ -552,13 +584,7 @@ export class MasksHandlerImpl implements MasksHandler {
             return;
         }
         const wrappingBbox = this.getDrawnObjectsWrappingBox();
-        if (this.brushMarker) {
-            this.canvas.remove(this.brushMarker);
-        }
         const imageData = this.imageDataFromCanvas(wrappingBbox);
-        if (this.brushMarker) {
-            this.canvas.add(this.brushMarker);
-        }
         const rle = imageDataToRLE(imageData);
         const isEmptyMask = rle.length < 2;
         this.tool.onBlockUpdated({
@@ -616,8 +642,10 @@ export class MasksHandlerImpl implements MasksHandler {
             fireRightClick: true,
             selection: false,
             defaultCursor: 'inherit',
+            renderOnAddRemove: false,
         });
-        this.canvas.imageSmoothingEnabled = false;
+        this.disableImageSmoothing();
+        this.canvas.calcViewportBoundaries();
         this.drawnObjects = this.createDrawnObjectsArray();
         this.clearHistory();
 
@@ -720,10 +748,11 @@ export class MasksHandlerImpl implements MasksHandler {
             }
 
             if (this.brushMarker) {
-                this.brushMarker.left = position.x - tool.size / 2;
-                this.brushMarker.top = position.y - tool.size / 2;
-                this.canvas.bringToFront(this.brushMarker);
-                this.canvas.renderAll();
+                // Rounding prevents flickering of the brush marker edge
+                // when mouse moves
+                this.brushMarker.left = Math.round(position.x - tool.size / 2);
+                this.brushMarker.top = Math.round(position.y - tool.size / 2);
+                this.renderBrushMarker();
             }
 
             if (isMouseDown && !this.isHidden && !isBrushSizeChanging && ['brush', 'eraser'].includes(tool?.type)) {
@@ -733,6 +762,12 @@ export class MasksHandlerImpl implements MasksHandler {
                 const commonProperties = {
                     selectable: false,
                     evented: false,
+                    /*
+                        Every stroke is rendered exactly once, when it is created. Caching it
+                        would allocate an offscreen canvas per stroke, and a mask easily
+                        consists of thousands of them.
+                    */
+                    objectCaching: false,
                     globalCompositeOperation: tool.type === 'eraser' ? 'destination-out' : 'xor',
                 };
 
@@ -759,6 +794,7 @@ export class MasksHandlerImpl implements MasksHandler {
 
                 if (['brush', 'eraser'].includes(tool?.type)) {
                     this.addDrawnObject(shape);
+                    this.renderDrawnObject(shape);
                 }
 
                 // add line to smooth the mask
@@ -780,10 +816,10 @@ export class MasksHandlerImpl implements MasksHandler {
 
                         if (['brush', 'eraser'].includes(tool?.type)) {
                             this.addDrawnObject(line);
+                            this.renderDrawnObject(line);
                         }
                     }
                 }
-                this.canvas.renderAll();
             } else if (
                 isMouseDown && !this.isHidden && !isBrushSizeChanging &&
                 ['lasso-plus', 'lasso-minus'].includes(tool?.type) && this.lassoPoints
@@ -848,6 +884,10 @@ export class MasksHandlerImpl implements MasksHandler {
             this.canvas.setHeight(height);
             this.canvas.setWidth(width);
             this.canvas.setDimensions({ width, height });
+
+            this.disableImageSmoothing();
+            this.canvas.renderAll();
+            this.renderBrushMarker();
         }
 
         topCanvas.style.top = `${top}px`;
