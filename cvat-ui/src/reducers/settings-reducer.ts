@@ -43,10 +43,7 @@ const defaultState: SettingsState = {
         controlPointsSize: 5,
         textPosition: 'auto',
         textContent: 'id,source,label,attributes,descriptions,dimensions',
-        toolsBlockerState: {
-            algorithmsLocked: false,
-            buttonVisible: false,
-        },
+        showConflictRequirements: false,
         showTagsOnFrame: true,
     },
     player: {
@@ -268,6 +265,15 @@ export default (state = defaultState, action: AnyAction): SettingsState => {
                 },
             };
         }
+        case SettingsActionTypes.SWITCH_SHOWING_CONFLICT_REQUIREMENTS: {
+            return {
+                ...state,
+                workspace: {
+                    ...state.workspace,
+                    showConflictRequirements: action.payload.showConflictRequirements,
+                },
+            };
+        }
         case SettingsActionTypes.CHANGE_BRIGHTNESS_LEVEL: {
             return {
                 ...state,
@@ -421,15 +427,6 @@ export default (state = defaultState, action: AnyAction): SettingsState => {
                 },
             };
         }
-        case SettingsActionTypes.SWITCH_TOOLS_BLOCKER_STATE: {
-            return {
-                ...state,
-                workspace: {
-                    ...state.workspace,
-                    toolsBlockerState: { ...state.workspace.toolsBlockerState, ...action.payload.toolsBlockerState },
-                },
-            };
-        }
         case SettingsActionTypes.SWITCH_SETTINGS_DIALOG: {
             return {
                 ...state,
@@ -517,18 +514,6 @@ export default (state = defaultState, action: AnyAction): SettingsState => {
                 shapes: {
                     ...state.shapes,
                     showGroundTruth: false,
-                },
-            };
-        }
-        case AnnotationActionTypes.INTERACT_WITH_CANVAS: {
-            return {
-                ...state,
-                workspace: {
-                    ...state.workspace,
-                    toolsBlockerState: {
-                        buttonVisible: true,
-                        algorithmsLocked: false,
-                    },
                 },
             };
         }

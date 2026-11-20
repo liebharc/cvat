@@ -10,7 +10,7 @@ import {
 import { OrientationVisibility } from 'cvat-canvas3d-wrapper';
 import {
     Webhook, MLModel, Organization, Job, Task, Project, Label, User,
-    QualityConflict, FramesMetaData, RQStatus, Event, Invitation, SerializedAPISchema,
+    QualityConflict, QualityConflictRequirement, FramesMetaData, RQStatus, Event, Invitation, SerializedAPISchema,
     Request, JobValidationLayout, QualitySettings, TaskValidationLayout, ObjectState,
     ConsensusSettings, AboutData, ShapeType, ObjectType, ApiToken, AudioIntervalState,
     Membership, AnnotationFormats, CloudStorage, UserGrowthData,
@@ -165,6 +165,14 @@ export interface JobsState {
         deletes: {
             [tid: number]: boolean;
         };
+    };
+    addReplicas: {
+        modalVisible: boolean;
+        jobs: Job[];
+    };
+    distributeJobs: {
+        modalVisible: boolean;
+        jobs: Job[];
     };
 }
 
@@ -396,6 +404,10 @@ export interface PluginsState {
             header: {
                 saveAnnotationButton: (() => JSX.Element)[];
             };
+            conflictRequirement: ((props: {
+                job: Job;
+                requirement: QualityConflictRequirement;
+            }) => JSX.Element)[];
         };
         qualityControlPage: {
             task: {
@@ -574,11 +586,6 @@ export interface ModelsQuery {
 
 export type OpenCVTool = IntelligentScissors | OpenCVTracker;
 
-export interface ToolsBlockerState {
-    algorithmsLocked?: boolean;
-    buttonVisible?: boolean;
-}
-
 export interface ActiveInference {
     status: RQStatus;
     progress: number;
@@ -632,6 +639,7 @@ export interface BulkOperationsErrorState extends ErrorState {
         items: any[];
         operation: (item: any, idx: number, total: number) => Promise<void>;
         statusMessage: (item: any, idx: number, total: number) => string;
+        onSuccess?: () => void;
     };
 }
 
@@ -1101,11 +1109,11 @@ export interface WorkspaceSettingsState {
     showAllInterpolationTracks: boolean;
     intelligentPolygonCrop: boolean;
     defaultApproxPolyAccuracy: number;
-    toolsBlockerState: ToolsBlockerState;
     textFontSize: number;
     controlPointsSize: number;
     textPosition: 'auto' | 'center';
     textContent: string;
+    showConflictRequirements: boolean;
     showTagsOnFrame: boolean;
 }
 
